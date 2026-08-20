@@ -538,6 +538,108 @@ def regenerate_scene(scene_data: Dict, settings: Dict) -> Dict:
     return scene_data
 
 # -----------------------------
+# DISPLAY SCENE RESULTS FUNCTION
+# -----------------------------
+def display_scene_results(results: List[Dict]):
+    """
+    Display scene results in a nice grid layout with selection and regeneration options
+    """
+    if not results:
+        return
+    
+    # Bulk actions
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("✅ Select All", use_container_width=True):
+            for scene in results:
+                scene['selected'] = True
+            st.rerun()
+    with col2:
+        if st.button("❌ Deselect All", use_container_width=True):
+            for scene in results:
+                scene['selected'] = False
+            st.rerun()
+    with col3:
+        selected_count = sum(1 for s in results if s.get('selected', False))
+        st.info(f"Selected: {selected_count}/{len(results)}")
+    with col4:
+        if selected_count > 0:
+            if st.button("📦 Download Selected as ZIP", use_container_width=True):
+                with st.spinner("Creating ZIP file..."):
+                    zip_data = create_zip_export(results, selected_only=True)
+                    st.download_button(
+                        label="⬇️ Download ZIP",
+                        data=zip_data,
+                        file_name=f"broll_project_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                        mime="application/zip"
+                    )
+    
+    # Display each scene
+    for idx, scene_result in enumerate(results):
+        scene_num = scene_result['scene_num']
+        scene_text = scene_result['scene_text']
+        videos = scene_result['videos']
+        total_found = scene_result['total_found']
+        keywords = scene_result['keywords']
+        is_selected = scene_result.get('selected', False)
+        
+        # Scene header with selection
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            with st.expander(f"🎬 Scene {scene_num}: {scene_text[:60]}...", expanded=(idx==0)):
+                # Scene details
+                st.markdown(f"<div class='scene-card'>", unsafe_allow_html=True)
+                st.caption(f"**Full Scene:** {scene_text}")
+                st.caption(f"**Keywords:** {', '.join(keywords)}")
+                st.caption(f"**Videos Found:** {total_found}")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                if not videos:
+                    st.warning("⚠️ No videos match your filters")
+                    continue
+                
+                # Display videos in grid
+                cols = st.columns(min(4, len(videos)))
+                for col_idx, col in enumerate(cols):
+                    if col_idx < len(videos):
+                        video = videos[col_idx]
+                        selected_file = video.get('selected_file', {})
+                        video_url = selected_file.get('link', '')
+                        
+                        with col:
+                            if video_url:
+                                st.video(video_url)
+                                st.caption(f"🎬 {selected_file.get('width', '?')}×{selected_file.get('height', '?')}")
+                                st.caption(f"📦 {video.get('source', 'unknown')}")
+                                
+                                # Download button
+                                if st.button(f"⬇️ Download", key=f"dl_scene{scene_num}_vid{col_idx}"):
+                                    st.session_state.downloaded.append(video_url)
+                                    st.success("✅ Added to download list")
+        with col2:
+            # Selection checkbox
+            selected = st.checkbox("✅ Select", value=is_selected, key=f"sel_{scene_num}")
+            scene_result['selected'] = selected
+        with col3:
+            # Regenerate button
+            if st.button("🔄 Regenerate", key=f"reg_{scene_num}"):
+                with st.spinner("Regenerating scene..."):
+                    settings = {
+                        'pexels_api_key': pexels_api_key,
+                        'pixabay_api_key': pixabay_api_key,
+                        'stock_source': stock_source.lower(),
+                        'videos_per_scene': videos_per_scene,
+                        'use_ai_keywords': use_ai_keywords,
+                        'min_height': min_height,
+                        'target_ratio': target_ratio,
+                        'duration': duration
+                    }
+                    new_scene = regenerate_scene(scene_result, settings)
+                    results[idx] = new_scene
+                    st.success("✅ Scene regenerated!")
+                    st.rerun()
+
+# -----------------------------
 # MAIN APP LAYOUT
 # -----------------------------
 st.title("🎬 B-Roll Finder Pro")
@@ -826,108 +928,6 @@ with main_tab4:
             st.success("✅ Cleared download queue")
     else:
         st.info("💡 No videos in download queue")
-
-# -----------------------------
-# DISPLAY SCENE RESULTS FUNCTION
-# -----------------------------
-def display_scene_results(results: List[Dict]):
-    """
-    Display scene results in a nice grid layout with selection and regeneration options
-    """
-    if not results:
-        return
-    
-    # Bulk actions
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.button("✅ Select All", use_container_width=True):
-            for scene in results:
-                scene['selected'] = True
-            st.rerun()
-    with col2:
-        if st.button("❌ Deselect All", use_container_width=True):
-            for scene in results:
-                scene['selected'] = False
-            st.rerun()
-    with col3:
-        selected_count = sum(1 for s in results if s.get('selected', False))
-        st.info(f"Selected: {selected_count}/{len(results)}")
-    with col4:
-        if selected_count > 0:
-            if st.button("📦 Download Selected as ZIP", use_container_width=True):
-                with st.spinner("Creating ZIP file..."):
-                    zip_data = create_zip_export(results, selected_only=True)
-                    st.download_button(
-                        label="⬇️ Download ZIP",
-                        data=zip_data,
-                        file_name=f"broll_project_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                        mime="application/zip"
-                    )
-    
-    # Display each scene
-    for idx, scene_result in enumerate(results):
-        scene_num = scene_result['scene_num']
-        scene_text = scene_result['scene_text']
-        videos = scene_result['videos']
-        total_found = scene_result['total_found']
-        keywords = scene_result['keywords']
-        is_selected = scene_result.get('selected', False)
-        
-        # Scene header with selection
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            with st.expander(f"🎬 Scene {scene_num}: {scene_text[:60]}...", expanded=(idx==0)):
-                # Scene details
-                st.markdown(f"<div class='scene-card'>", unsafe_allow_html=True)
-                st.caption(f"**Full Scene:** {scene_text}")
-                st.caption(f"**Keywords:** {', '.join(keywords)}")
-                st.caption(f"**Videos Found:** {total_found}")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                if not videos:
-                    st.warning("⚠️ No videos match your filters")
-                    continue
-                
-                # Display videos in grid
-                cols = st.columns(min(4, len(videos)))
-                for col_idx, col in enumerate(cols):
-                    if col_idx < len(videos):
-                        video = videos[col_idx]
-                        selected_file = video.get('selected_file', {})
-                        video_url = selected_file.get('link', '')
-                        
-                        with col:
-                            if video_url:
-                                st.video(video_url)
-                                st.caption(f"🎬 {selected_file.get('width', '?')}×{selected_file.get('height', '?')}")
-                                st.caption(f"📦 {video.get('source', 'unknown')}")
-                                
-                                # Download button
-                                if st.button(f"⬇️ Download", key=f"dl_scene{scene_num}_vid{col_idx}"):
-                                    st.session_state.downloaded.append(video_url)
-                                    st.success("✅ Added to download list")
-        with col2:
-            # Selection checkbox
-            selected = st.checkbox("✅ Select", value=is_selected, key=f"sel_{scene_num}")
-            scene_result['selected'] = selected
-        with col3:
-            # Regenerate button
-            if st.button("🔄 Regenerate", key=f"reg_{scene_num}"):
-                with st.spinner("Regenerating scene..."):
-                    settings = {
-                        'pexels_api_key': pexels_api_key,
-                        'pixabay_api_key': pixabay_api_key,
-                        'stock_source': stock_source.lower(),
-                        'videos_per_scene': videos_per_scene,
-                        'use_ai_keywords': use_ai_keywords,
-                        'min_height': min_height,
-                        'target_ratio': target_ratio,
-                        'duration': duration
-                    }
-                    new_scene = regenerate_scene(scene_result, settings)
-                    results[idx] = new_scene
-                    st.success("✅ Scene regenerated!")
-                    st.rerun()
 
 # -----------------------------
 # FOOTER
