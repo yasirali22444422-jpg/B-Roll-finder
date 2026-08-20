@@ -1,4 +1,4 @@
-```python
+python
 import streamlit as st
 import requests
 
@@ -138,4 +138,3 @@ if st.button("🔍 Search Videos", type="primary"):
                     st.warning(
                         "No playable video found."
                     )
-```
