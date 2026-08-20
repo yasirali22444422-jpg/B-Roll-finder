@@ -1,4 +1,3 @@
-python
 import streamlit as st
 import requests
 
@@ -10,11 +9,6 @@ st.set_page_config(
     page_icon="🎬",
     layout="wide"
 )
-
-# -----------------------------
-# PEXELS API KEY
-# -----------------------------
-api_key = "AbqSkVbZko07cGsPYZbQgm7SVvwhKPqqYV8bYZs254tAF5OKHcFBQHQl"
 
 # -----------------------------
 # TITLE
@@ -39,9 +33,10 @@ if st.button("🔍 Search Videos", type="primary"):
         st.warning("Please enter a keyword.")
         st.stop()
 
-    # -----------------------------
-    # PEXELS API
-    # -----------------------------
+    # Get API key
+    api_key = "AbqSkVbZko07cGsPYZbQgm7SVvwhKPqqYV8bYZs254tAF5OKHcFBQHQl"
+
+    # Pexels API
     url = "https://api.pexels.com/videos/search"
 
     headers = {
@@ -53,9 +48,7 @@ if st.button("🔍 Search Videos", type="primary"):
         "per_page": 12
     }
 
-    # -----------------------------
-    # REQUEST
-    # -----------------------------
+    # Request
     try:
         response = requests.get(
             url,
@@ -68,9 +61,7 @@ if st.button("🔍 Search Videos", type="primary"):
         st.write(str(e))
         st.stop()
 
-    # -----------------------------
-    # CHECK RESPONSE
-    # -----------------------------
+    # Check response
     if response.status_code != 200:
         st.error(
             f"Pexels API Error: {response.status_code}"
