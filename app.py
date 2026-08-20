@@ -3,50 +3,58 @@ import requests
 import re
 import io
 import json
+import zipfile
 import time
 from datetime import datetime
 
 # -----------------------------
-# PAGE CONFIG
+# PAGE CONFIG - Clean UI
 # -----------------------------
 st.set_page_config(
-    page_title="B-Roll Finder Pro",
+    page_title="B-Roll Collector",
     page_icon="🎬",
     layout="wide"
 )
 
 # -----------------------------
-# HIDE STREAMLIT ELEMENTS (Backend hidden)
+# HIDE STREAMLIT ELEMENTS
 # -----------------------------
 hide_streamlit_style = """
     <style>
-        /* Hide hamburger menu, footer, and deploy button */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
-        
-        /* Hide all expander arrows and make it clean */
-        .streamlit-expanderHeader {display: none;}
-        
-        /* Remove all Streamlit branding */
         .stApp > header {display: none;}
         .stApp > footer {display: none;}
-        
-        /* Hide st.status, st.spinner, st.toast */
         .stAlert {display: none;}
         .stSpinner {display: none;}
         
-        /* Hide all Streamlit specific classes */
-        .st-emotion-cache-1v0mbdj {display: none;}
-        .st-emotion-cache-18ni7ap {display: none;}
-        .st-emotion-cache-1j6wv82 {display: none;}
+        /* Hide API key value */
+        .stTextInput input[type="password"] {
+            -webkit-text-security: disc !important;
+        }
         
-        /* Make it look like a standalone app */
+        /* Clean expander */
+        .streamlit-expanderHeader {
+            font-weight: bold;
+            color: #ff4b4b;
+        }
+        
+        /* Custom styling */
         .stApp {
             background: #0e1117;
         }
-        
-        /* Custom scrollbar */
+        .stButton > button {
+            background: #ff4b4b;
+            color: white;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px 30px;
+        }
+        .stButton > button:hover {
+            background: #ff6b6b;
+            color: white;
+        }
         ::-webkit-scrollbar {
             width: 6px;
         }
@@ -62,118 +70,127 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # -----------------------------
-# SESSION STATE (for caching)
+# SESSION STATE
 # -----------------------------
-if 'search_history' not in st.session_state:
-    st.session_state.search_history = {}
-if 'downloaded' not in st.session_state:
-    st.session_state.downloaded = []
+if 'selected_clips' not in st.session_state:
+    st.session_state.selected_clips = []
+if 'all_results' not in st.session_state:
+    st.session_state.all_results = []
+if 'downloaded_zip' not in st.session_state:
+    st.session_state.downloaded_zip = None
 
 # -----------------------------
-# TITLE
+# HEADER
 # -----------------------------
-st.title("🎬 B-Roll Finder Pro")
+st.title("🎬 B-Roll Collector")
+st.markdown("**Script se B-Roll ready in 2 minutes**")
 st.markdown("---")
 
 # -----------------------------
-# SIDEBAR - SETTINGS
+# SIDEBAR - SETTINGS (HIDDEN API)
 # -----------------------------
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # API Key
+    # API Key - Hidden properly
     api_key = st.text_input(
-        "Pexels API Key",
-        value="AbqSkVbZko07cGsPYZbQgm7SVvwhKPqqYV8bYZs254tAF5OKHcFBQHQl",
-        type="password"
+        "API Key",
+        value="",
+        type="password",
+        placeholder="Enter your Pexels API key",
+        help="Get free API key from pexels.com/api"
     )
+    
+    # If key exists, show status only
+    if api_key:
+        st.success("✅ API Key configured")
     
     st.markdown("---")
     
     # -----------------------------
-    # SEARCH CAPACITY (Manual Number)
+    # DURATION FILTER - Seconds + Minutes
+    # -----------------------------
+    st.subheader("⏱️ Video Duration")
+    
+    duration_type = st.radio(
+        "Select duration type:",
+        ["Seconds", "Minutes"],
+        horizontal=True
+    )
+    
+    if duration_type == "Seconds":
+        duration_sec = st.selectbox(
+            "Duration (seconds)",
+            ["Any", "5s", "10s", "15s", "20s", "30s", "45s", "60s"]
+        )
+        duration_min = None
+    else:
+        duration_min = st.selectbox(
+            "Duration (minutes)",
+            ["Any", "1 min", "2 min", "3 min", "5 min", "10 min"]
+        )
+        duration_sec = None
+    
+    st.markdown("---")
+    
+    # -----------------------------
+    # SEARCH CAPACITY
     # -----------------------------
     st.subheader("🔍 Search Capacity")
-    
-    search_capacity = st.number_input(
+    per_page = st.number_input(
         "Videos per search",
         min_value=1,
         max_value=80,
-        value=12,
-        step=1,
-        help="How many videos to fetch per keyword"
+        value=12
     )
     
     st.markdown("---")
     
     # -----------------------------
-    # RESOLUTION OPTIONS
+    # RESOLUTION
     # -----------------------------
     st.subheader("📐 Resolution")
-    
     resolution = st.selectbox(
         "Select Resolution",
-        [
-            "440p (SD)",
-            "720p (HD)",
-            "1080p (Full HD)",
-            "4K (Ultra HD)",
-            "4K+ (8K)"
-        ],
-        index=1
+        ["440p", "720p", "1080p", "4K", "4K+"]
     )
     
-    # Resolution mapping
     res_map = {
-        "440p (SD)": 440,
-        "720p (HD)": 720,
-        "1080p (Full HD)": 1080,
-        "4K (Ultra HD)": 2160,
-        "4K+ (8K)": 4320
+        "440p": 440,
+        "720p": 720,
+        "1080p": 1080,
+        "4K": 2160,
+        "4K+": 4320
     }
     min_height = res_map[resolution]
     
     st.markdown("---")
     
     # -----------------------------
-    # ASPECT RATIO / PLATFORM
+    # PLATFORM / ASPECT RATIO
     # -----------------------------
-    st.subheader("📱 Platform / Aspect Ratio")
-    
+    st.subheader("📱 Platform")
     platform = st.selectbox(
         "Select Platform",
-        [
-            "YouTube (16:9) - Long Form",
-            "Instagram Reels (9:16)",
-            "YouTube Shorts (9:16)",
-            "Instagram Feed (1:1)",
-            "Facebook (16:9)",
-            "Twitter/X (16:9)",
-            "Custom Aspect Ratio"
-        ]
+        ["YouTube (16:9)", "Instagram Reels (9:16)", "YouTube Shorts (9:16)", "Instagram Feed (1:1)", "Facebook (16:9)", "Custom"]
     )
     
-    # Aspect ratio mapping
-    aspect_map = {
-        "YouTube (16:9) - Long Form": {"width": 1920, "height": 1080, "ratio": "16:9"},
-        "Instagram Reels (9:16)": {"width": 1080, "height": 1920, "ratio": "9:16"},
-        "YouTube Shorts (9:16)": {"width": 1080, "height": 1920, "ratio": "9:16"},
-        "Instagram Feed (1:1)": {"width": 1080, "height": 1080, "ratio": "1:1"},
-        "Facebook (16:9)": {"width": 1920, "height": 1080, "ratio": "16:9"},
-        "Twitter/X (16:9)": {"width": 1920, "height": 1080, "ratio": "16:9"},
-    }
-    
-    if platform == "Custom Aspect Ratio":
+    if platform == "Custom":
         col1, col2 = st.columns(2)
         with col1:
-            custom_width = st.number_input("Width", value=1920)
+            custom_w = st.number_input("Width", value=1920)
         with col2:
-            custom_height = st.number_input("Height", value=1080)
-        target_width = custom_width
-        target_height = custom_height
+            custom_h = st.number_input("Height", value=1080)
     else:
-        target_width = aspect_map[platform]["width"]
-        target_height = aspect_map[platform]["height"]
+        platform_map = {
+            "YouTube (16:9)": {"w": 1920, "h": 1080},
+            "Instagram Reels (9:16)": {"w": 1080, "h": 1920},
+            "YouTube Shorts (9:16)": {"w": 1080, "h": 1920},
+            "Instagram Feed (1:1)": {"w": 1080, "h": 1080},
+            "Facebook (16:9)": {"w": 1920, "h": 1080}
+        }
+        custom_w = platform_map[platform]["w"]
+        custom_h = platform_map[platform]["h"]
     
     st.markdown("---")
     
@@ -181,321 +198,274 @@ with st.sidebar:
     # MEDIA TYPE
     # -----------------------------
     st.subheader("🖼️ Media Type")
-    
     media_type = st.radio(
-        "Select Media Type",
-        ["🎬 Videos Only", "🖼️ Images Only", "🎬🖼️ Both"],
-        index=0
-    )
-    
-    st.markdown("---")
-    
-    # -----------------------------
-    # DURATION FILTER
-    # -----------------------------
-    st.subheader("⏱️ Duration")
-    
-    duration = st.selectbox(
-        "Video Duration",
-        ["Any", "5-10 sec", "10-20 sec", "20-30 sec", "30-60 sec", "60+ sec"]
+        "Select:",
+        ["Videos", "Images", "Both"],
+        horizontal=True
     )
 
 # -----------------------------
-# MAIN - SCRIPT INPUT
+# MAIN - COMPETITOR LIKE UI
 # -----------------------------
-tab1, tab2 = st.tabs(["📝 Script Mode", "🔍 Keyword Mode"])
+st.subheader("📝 Step 1: Choose Your Niche")
 
-with tab1:
-    st.subheader("📝 Paste Your Script")
-    
-    script = st.text_area(
-        "",
-        placeholder="Paste your script here...\n\nExample:\nIn 2020, the global economy faced an unprecedented crisis. Stock markets crashed worldwide. Businesses struggled to survive. Governments introduced stimulus packages.",
-        height=150
-    )
-    
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        split_method = st.selectbox(
-            "Split Script By",
-            ["Sentence (.)", "2 Sentences", "3 Sentences", "Paragraph"]
-        )
-    with col2:
-        scenes_per_search = st.number_input(
-            "Scenes to process",
-            min_value=1,
-            max_value=50,
-            value=10
-        )
-    
-    if st.button("🚀 Generate B-Roll", type="primary", use_container_width=True):
-        if not script.strip():
-            st.error("❌ Please paste a script first!")
-            st.stop()
-            
-        if not api_key:
-            st.error("❌ Please enter Pexels API key!")
-            st.stop()
-        
-        # Split script
-        sentences = [s.strip() for s in re.split(r'[.!?]+', script) if s.strip()]
-        
-        if split_method == "Sentence (.)":
-            scenes = sentences[:scenes_per_search]
-        elif split_method == "2 Sentences":
-            scenes = [' '.join(sentences[i:i+2]) for i in range(0, len(sentences), 2)][:scenes_per_search]
-        elif split_method == "3 Sentences":
-            scenes = [' '.join(sentences[i:i+3]) for i in range(0, len(sentences), 3)][:scenes_per_search]
-        else:  # Paragraph
-            scenes = [p.strip() for p in script.split('\n') if p.strip()][:scenes_per_search]
-        
-        if not scenes:
-            st.error("❌ No scenes found!")
-            st.stop()
-        
-        st.success(f"✅ {len(scenes)} scenes detected")
-        
-        # Progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Store results
-        all_results = []
-        total_videos = 0
-        
-        for idx, scene in enumerate(scenes):
-            status_text.text(f"🔄 Processing scene {idx+1}/{len(scenes)}...")
-            
-            # Extract keywords
-            words = re.findall(r'\b[a-zA-Z]{4,}\b', scene)
-            keywords = list(set([w.lower() for w in words]))[:3]
-            
-            if not keywords:
-                keywords = ["business", "people", "work"]
-            
-            # Search Pexels
-            url = "https://api.pexels.com/videos/search"
-            headers = {"Authorization": api_key}
-            
-            scene_results = []
-            search_queries = []
-            
-            for kw in keywords:
-                params = {
-                    "query": kw,
-                    "per_page": min(search_capacity, 80)
-                }
-                
-                try:
-                    response = requests.get(url, headers=headers, params=params, timeout=30)
-                    if response.status_code == 200:
-                        data = response.json()
-                        videos = data.get("videos", [])
-                        scene_results.extend(videos)
-                        search_queries.append(kw)
-                except:
-                    pass
-            
-            # Filter by resolution and aspect ratio
-            filtered_results = []
-            for video in scene_results:
-                video_files = video.get("video_files", [])
-                for file in video_files:
-                    height = file.get("height", 0)
-                    width = file.get("width", 0)
-                    
-                    # Resolution filter
-                    if height < min_height:
-                        continue
-                    
-                    # Aspect ratio filter (approximate)
-                    if platform != "Custom Aspect Ratio":
-                        file_ratio = width / height if height > 0 else 0
-                        target_ratio = target_width / target_height
-                        if abs(file_ratio - target_ratio) > 0.2:  # Tolerance
-                            continue
-                    
-                    filtered_results.append({
-                        "video": video,
-                        "file": file,
-                        "width": width,
-                        "height": height
-                    })
-                    break
-            
-            # Sort by resolution (highest first)
-            filtered_results.sort(key=lambda x: x["height"], reverse=True)
-            
-            all_results.append({
-                "scene_num": idx + 1,
-                "scene": scene,
-                "keywords": search_queries,
-                "results": filtered_results[:search_capacity],
-                "total": len(filtered_results)
-            })
-            
-            total_videos += len(filtered_results)
-            
-            # Update progress
-            progress_bar.progress((idx + 1) / len(scenes))
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        st.success(f"✅ Found {total_videos} total videos")
-        
-        # -----------------------------
-        # DISPLAY RESULTS
-        # -----------------------------
-        for result in all_results:
-            scene_num = result["scene_num"]
-            scene_text = result["scene"]
-            
-            with st.expander(f"🎬 Scene {scene_num}: {scene_text[:60]}...", expanded=(scene_num==1)):
-                st.caption(f"**Full Scene:** {scene_text}")
-                st.caption(f"**Keywords:** {', '.join(result['keywords'])}")
-                st.caption(f"**Videos Found:** {result['total']}")
-                
-                if not result["results"]:
-                    st.warning("⚠️ No videos match your filters")
-                    continue
-                
-                # Display videos in grid
-                cols = st.columns(min(4, len(result["results"])))
-                
-                for idx, col in enumerate(cols):
-                    if idx < len(result["results"]):
-                        item = result["results"][idx]
-                        video = item["video"]
-                        file = item["file"]
-                        
-                        with col:
-                            video_url = file.get("link")
-                            
-                            # Check if media type is video
-                            if media_type == "🖼️ Images Only":
-                                # Get thumbnail
-                                thumb = video.get("image", "")
-                                st.image(thumb, use_container_width=True)
-                                st.caption(f"📸 {file.get('width', '?')}×{file.get('height', '?')}")
-                            else:
-                                # Show video
-                                st.video(video_url)
-                                st.caption(f"🎬 {file.get('width', '?')}×{file.get('height', '?')}")
-                            
-                            # Download button
-                            if st.button(f"⬇️ Download", key=f"down_{scene_num}_{idx}"):
-                                st.session_state.downloaded.append(video_url)
-                                st.success("✅ Added to download list")
-        
-        # -----------------------------
-        # BULK DOWNLOAD
-        # -----------------------------
-        if all_results:
-            st.markdown("---")
-            st.subheader("📦 Bulk Download")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("📥 Download Selected", use_container_width=True):
-                    if st.session_state.downloaded:
-                        st.info(f"✅ {len(st.session_state.downloaded)} videos ready for download")
-                    else:
-                        st.warning("⚠️ No videos selected")
-            
-            with col2:
-                if st.button("📦 Download All as ZIP", use_container_width=True):
-                    st.info("🔄 Preparing ZIP file...")
-                    st.success("✅ ZIP download feature ready!")
-            
-            with col3:
-                if st.button("🗑️ Clear Selection", use_container_width=True):
-                    st.session_state.downloaded = []
-                    st.success("✅ Cleared")
-            
-            # Show downloaded count
-            st.info(f"📌 Selected: {len(st.session_state.downloaded)} videos")
+niche = st.selectbox(
+    "Select Niche",
+    ["Finance", "Technology", "Health", "Real Estate", "Travel", "Motivation", "Business", "Education", "Food", "Fashion", "Sports", "Nature", "History", "Celebrity", "Geopolitics", "Other"]
+)
 
-with tab2:
-    st.subheader("🔍 Search by Keyword")
+st.subheader("📝 Step 2: Add Your Script")
+
+# Title input
+video_title = st.text_input(
+    "Video Title",
+    placeholder="Example: Financial Strategies for Seniors After Retirement"
+)
+
+# Script input
+script = st.text_area(
+    "Paste Your Script Here",
+    placeholder="Paste your full script here...\n\nExample:\nIn 2020, the global economy faced an unprecedented crisis. Stock markets crashed worldwide. Governments introduced stimulus packages...",
+    height=200
+)
+
+# Script info display (like competitor)
+if script:
+    char_count = len(script)
+    sentence_count = len([s for s in re.split(r'[.!?]+', script) if s.strip()])
+    estimated_clips = (sentence_count // 2) + (sentence_count % 2)
     
-    keyword = st.text_input("Enter keyword", placeholder="business meeting, nature, etc.")
-    
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        per_page = st.number_input("Results per page", min_value=1, max_value=80, value=12)
+        st.metric("Characters", char_count)
     with col2:
-        orientation = st.selectbox("Orientation", ["All", "Landscape", "Portrait", "Square"])
+        st.metric("Sentences", sentence_count)
+    with col3:
+        st.metric("Estimated B-rolls", estimated_clips)
+
+# Split option (competitor uses 2 sentences)
+st.subheader("📝 Split Settings")
+split_type = st.radio(
+    "Split Script By:",
+    ["2 Sentences (Recommended)", "1 Sentence", "3 Sentences", "Custom"],
+    horizontal=True
+)
+
+if split_type == "Custom":
+    custom_split = st.number_input("Sentences per clip", min_value=1, max_value=10, value=2)
+
+# -----------------------------
+# GENERATE B-ROLL BUTTON
+# -----------------------------
+if st.button("🎬 Collect B-Rolls", type="primary", use_container_width=True):
+    if not script.strip():
+        st.error("❌ Please paste a script!")
+        st.stop()
     
-    if st.button("🔍 Search", type="primary", use_container_width=True):
-        if not keyword.strip():
-            st.error("❌ Please enter a keyword")
-            st.stop()
+    if not api_key:
+        st.error("❌ Please add your API key in sidebar!")
+        st.stop()
+    
+    # Split script
+    sentences = [s.strip() for s in re.split(r'[.!?]+', script) if s.strip()]
+    
+    if split_type == "1 Sentence":
+        scenes = sentences
+    elif split_type == "2 Sentences (Recommended)":
+        scenes = [' '.join(sentences[i:i+2]) for i in range(0, len(sentences), 2)]
+    elif split_type == "3 Sentences":
+        scenes = [' '.join(sentences[i:i+3]) for i in range(0, len(sentences), 3)]
+    else:  # Custom
+        scenes = [' '.join(sentences[i:i+custom_split]) for i in range(0, len(sentences), custom_split)]
+    
+    st.success(f"✅ Script split into {len(scenes)} scenes")
+    
+    # Progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Store results
+    all_results = []
+    all_video_urls = []
+    
+    for idx, scene in enumerate(scenes):
+        status_text.text(f"🔄 Splitting Script... Extracting Keywords... Fetching B-rolls for scene {idx+1}/{len(scenes)}")
         
-        if not api_key:
-            st.error("❌ Please enter Pexels API key")
-            st.stop()
+        # Extract keywords (like competitor)
+        words = re.findall(r'\b[a-zA-Z]{4,}\b', scene)
+        keywords = list(set([w.lower() for w in words]))[:3]
         
+        if not keywords:
+            keywords = ["business", "people", "work"]
+        
+        # Search Pexels
         url = "https://api.pexels.com/videos/search"
         headers = {"Authorization": api_key}
-        params = {
-            "query": keyword,
-            "per_page": min(per_page, 80)
-        }
         
-        with st.spinner("Searching..."):
-            response = requests.get(url, headers=headers, params=params, timeout=30)
+        scene_results = []
         
-        if response.status_code != 200:
-            st.error(f"❌ Error: {response.status_code}")
-            st.stop()
+        for kw in keywords:
+            params = {
+                "query": kw,
+                "per_page": min(per_page, 80)
+            }
+            
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    videos = data.get("videos", [])
+                    scene_results.extend(videos)
+            except:
+                pass
         
-        data = response.json()
-        videos = data.get("videos", [])
+        # Filter by resolution and aspect ratio
+        filtered_results = []
+        for video in scene_results:
+            video_files = video.get("video_files", [])
+            for file in video_files:
+                height = file.get("height", 0)
+                width = file.get("width", 0)
+                
+                if height < min_height:
+                    continue
+                
+                # Check aspect ratio
+                file_ratio = width / height if height > 0 else 0
+                target_ratio = custom_w / custom_h
+                if abs(file_ratio - target_ratio) > 0.3:
+                    continue
+                
+                filtered_results.append({
+                    "video": video,
+                    "file": file,
+                    "url": file.get("link"),
+                    "width": width,
+                    "height": height
+                })
+                break
         
-        if not videos:
-            st.warning("⚠️ No videos found")
-            st.stop()
+        # Sort by quality
+        filtered_results.sort(key=lambda x: x["height"], reverse=True)
         
-        st.success(f"✅ Found {len(videos)} videos")
+        # Get top result (like competitor gives 1 per scene)
+        best_result = filtered_results[0] if filtered_results else None
         
-        # Display in grid
-        for row_start in range(0, len(videos), 4):
-            cols = st.columns(4)
-            for col, video in zip(cols, videos[row_start:row_start+4]):
-                with col:
-                    video_files = video.get("video_files", [])
-                    
-                    # Filter by resolution
-                    selected_file = None
-                    for file in video_files:
-                        height = file.get("height", 0)
-                        if height >= min_height:
-                            selected_file = file
-                            break
-                    
-                    if selected_file is None and video_files:
-                        selected_file = video_files[0]
-                    
-                    if selected_file:
-                        video_url = selected_file.get("link")
-                        
-                        if media_type == "🖼️ Images Only":
-                            thumb = video.get("image", "")
-                            st.image(thumb, use_container_width=True)
-                        else:
-                            st.video(video_url)
-                        
-                        st.caption(f"🎬 {selected_file.get('width', '?')}×{selected_file.get('height', '?')}")
+        if best_result:
+            all_video_urls.append(best_result["url"])
+        
+        all_results.append({
+            "scene_num": idx + 1,
+            "scene": scene,
+            "keywords": keywords,
+            "best": best_result,
+            "all": filtered_results[:per_page],
+            "total": len(filtered_results)
+        })
+        
+        progress_bar.progress((idx + 1) / len(scenes))
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    # Store in session
+    st.session_state.all_results = all_results
+    st.session_state.video_urls = all_video_urls
+    
+    st.success(f"✅ Found {len(all_video_urls)} B-roll clips!")
 
 # -----------------------------
-# FOOTER
+# DISPLAY RESULTS (Like Competitor)
+# -----------------------------
+if st.session_state.all_results:
+    st.markdown("---")
+    st.subheader("🎥 Your B-Roll Clips")
+    st.caption("Numbered clips ready for download")
+    
+    # Display in grid with numbering
+    for idx, result in enumerate(st.session_state.all_results):
+        scene_num = result["scene_num"]
+        scene_text = result["scene"]
+        best = result["best"]
+        
+        if best:
+            with st.expander(f"Clip {scene_num:03d} - {scene_text[:50]}...", expanded=(scene_num<=3)):
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.video(best["url"])
+                
+                with col2:
+                    st.caption(f"**Scene:** {scene_text}")
+                    st.caption(f"**Keywords:** {', '.join(result['keywords'])}")
+                    st.caption(f"**Resolution:** {best['width']}×{best['height']}")
+                    st.caption(f"**Status:** ✅ Ready")
+                    
+                    # Download individual
+                    if st.button(f"⬇️ Download Clip {scene_num:03d}", key=f"down_{scene_num}"):
+                        st.info(f"Downloading clip {scene_num:03d}...")
+                        st.markdown(f"[Click here to download]({best['url']})")
+    
+    # -----------------------------
+    # BULK DOWNLOAD - ZIP
+    # -----------------------------
+    st.markdown("---")
+    st.subheader("📦 Bulk Download")
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        if st.button("📥 Download ZIP", use_container_width=True):
+            if st.session_state.video_urls:
+                st.info(f"🔄 Preparing ZIP with {len(st.session_state.video_urls)} clips...")
+                
+                # Create ZIP in memory
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                    for idx, url in enumerate(st.session_state.video_urls, 1):
+                        try:
+                            response = requests.get(url, timeout=30)
+                            if response.status_code == 200:
+                                filename = f"clip_{idx:03d}.mp4"
+                                zip_file.writestr(filename, response.content)
+                        except:
+                            pass
+                
+                zip_buffer.seek(0)
+                st.session_state.downloaded_zip = zip_buffer.getvalue()
+                
+                st.success("✅ ZIP ready!")
+            else:
+                st.warning("⚠️ No clips to download")
+    
+    with col2:
+        if st.session_state.downloaded_zip:
+            st.download_button(
+                label="💾 Save ZIP",
+                data=st.session_state.downloaded_zip,
+                file_name=f"broll_clips_{datetime.now().strftime('%Y%m%d')}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+    
+    with col3:
+        if st.button("🗑️ Clear All", use_container_width=True):
+            st.session_state.all_results = []
+            st.session_state.video_urls = []
+            st.session_state.downloaded_zip = None
+            st.success("✅ Cleared")
+    
+    # Show count
+    st.info(f"📌 Total clips ready: {len(st.session_state.video_urls)}")
+
+# -----------------------------
+# FOOTER (Like Competitor)
 # -----------------------------
 st.markdown("---")
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.caption("🎬 B-Roll Finder Pro v1.2")
+    st.caption("🎬 B-Roll Collector")
 with col2:
-    st.caption("⚡ Powered by Pexels API")
+    st.caption("⚡ Script to B-Roll in 2 Minutes")
 with col3:
-    st.caption(f"📊 {len(st.session_state.downloaded)} clips selected")
+    st.caption(f"📊 {len(st.session_state.video_urls) if hasattr(st.session_state, 'video_urls') else 0} clips ready")
