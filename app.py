@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import requests
 
@@ -9,6 +10,11 @@ st.set_page_config(
     page_icon="🎬",
     layout="wide"
 )
+
+# -----------------------------
+# PEXELS API KEY
+# -----------------------------
+api_key = "AbqSkVbZko07cGsPYZbQgm7SVvwhKPqqYV8bYZs254tAF5OKHcFBQHQl"
 
 # -----------------------------
 # TITLE
@@ -33,18 +39,9 @@ if st.button("🔍 Search Videos", type="primary"):
         st.warning("Please enter a keyword.")
         st.stop()
 
-    # Get API key from Streamlit Secrets
-    try:
-        api_key = st.secrets["AbqSkVbZko07cGsPYZbQgm7SVvwhKPqqYV8bYZs254tAF5OKHcFBQHQl"]
-    except Exception:
-        st.error("Pexels API key is missing.")
-        st.info(
-            "Go to Streamlit → App Settings → Secrets "
-            "and add PEXELS_API_KEY."
-        )
-        st.stop()
-
-    # Pexels API
+    # -----------------------------
+    # PEXELS API
+    # -----------------------------
     url = "https://api.pexels.com/videos/search"
 
     headers = {
@@ -56,7 +53,9 @@ if st.button("🔍 Search Videos", type="primary"):
         "per_page": 12
     }
 
-    # Request
+    # -----------------------------
+    # REQUEST
+    # -----------------------------
     try:
         response = requests.get(
             url,
@@ -69,7 +68,9 @@ if st.button("🔍 Search Videos", type="primary"):
         st.write(str(e))
         st.stop()
 
-    # Check response
+    # -----------------------------
+    # CHECK RESPONSE
+    # -----------------------------
     if response.status_code != 200:
         st.error(
             f"Pexels API Error: {response.status_code}"
@@ -137,3 +138,4 @@ if st.button("🔍 Search Videos", type="primary"):
                     st.warning(
                         "No playable video found."
                     )
+```
